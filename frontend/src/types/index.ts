@@ -7,6 +7,7 @@ export interface User {
   is_premium: boolean;
   is_admin?: boolean;
   is_active?: boolean;
+  phone?: string;
   created_at: string;
 }
 

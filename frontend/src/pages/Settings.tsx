@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Save, AlertTriangle } from 'lucide-react';
+import { Save, AlertTriangle, Phone } from 'lucide-react';
 import api from '../api/client';
 import useAuthStore from '../store/useAuthStore';
 
@@ -25,6 +25,7 @@ export default function Settings() {
   const [name, setName] = useState(user?.name || '');
   const [currency, setCurrency] = useState(user?.currency || 'EUR');
   const [avatarColor, setAvatarColor] = useState(user?.avatar_color || '#4F46E5');
+  const [phone, setPhone] = useState(user?.phone || '');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
@@ -38,7 +39,7 @@ export default function Settings() {
     setSaving(true);
 
     try {
-      const res = await api.put('/users/profile', { name, currency, avatar_color: avatarColor });
+      const res = await api.put('/users/profile', { name, currency, avatar_color: avatarColor, phone });
       updateUser(res.data);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -107,7 +108,7 @@ export default function Settings() {
 
           {/* Name */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Display name</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Nome</label>
             <input
               type="text"
               value={name}
@@ -115,6 +116,24 @@ export default function Settings() {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none text-sm"
               required
             />
+          </div>
+
+          {/* Phone */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Numero di telefono <span className="text-gray-400 font-normal">(opzionale)</span>
+            </label>
+            <div className="relative">
+              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="tel"
+                value={phone}
+                onChange={e => setPhone(e.target.value)}
+                placeholder="+39 333 1234567"
+                className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none text-sm"
+              />
+            </div>
+            <p className="text-xs text-gray-400 mt-1">Usato per trovarti più facilmente e per inviti WhatsApp</p>
           </div>
 
           {/* Currency */}

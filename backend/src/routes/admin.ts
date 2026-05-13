@@ -48,9 +48,11 @@ router.get('/users', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const where: any = {};
     if (search) {
+      const phoneSearch = search.replace(/[^\d+]/g, '');
       where.OR = [
         { email: { contains: search, mode: 'insensitive' } },
         { name: { contains: search, mode: 'insensitive' } },
+        ...(phoneSearch.length >= 4 ? [{ phone: { contains: phoneSearch } }] : []),
       ];
     }
 
@@ -69,11 +71,11 @@ router.get('/users', async (req: AuthRequest, res: Response): Promise<void> => {
 
     res.json({
       users: users.map(u => {
-        const { passwordHash, ...rest } = u;
+        const { passwordHash, _count, ...rest } = u as any;
         return {
           ...rest,
-          group_count: u._count.memberships,
-          expense_count: u._count.expensesPaid,
+          group_count: _count.memberships,
+          expense_count: _count.expensesPaid,
         };
       }),
       total,
@@ -104,6 +106,34 @@ router.post('/users/invite', async (req: AuthRequest, res: Response): Promise<vo
 
     await sendPlatformInvite(email, req.user!.name, message);
     res.json({ sent: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/users/invite-whatsapp', async (req: AuthRequest, res: Response): Promise<void> => {
+  const { phone, message } = req.body;
+  if (!phone) { res.status(400).json({ error: 'Numero di telefono richiesto' }); return; }
+
+  const cleaned = phone.replace(/[^\d]/g, '');
+  if (cleaned.length < 7) { res.status(400).json({ error: 'Numero non valido' }); return; }
+
+  try {
+    const existing = await prisma.user.findFirst({ where: { phone: { contains: cleaned } } });
+    if (existing) {
+      res.status(409).json({
+        error: 'Utente già registrato con questo numero',
+        user: { id: existing.id, name: existing.name, email: existing.email },
+      });
+      return;
+    }
+
+    const appUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const defaultMsg = `Ciao! Ti invito su DivideEtCollabora, l'app per dividere le spese in modo semplice. Registrati gratis qui: ${appUrl}/register`;
+    const text = encodeURIComponent(message || defaultMsg);
+    const waUrl = `https://wa.me/${cleaned}?text=${text}`;
+
+    res.json({ whatsappUrl: waUrl, phone: cleaned });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

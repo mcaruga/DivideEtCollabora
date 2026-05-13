@@ -32,8 +32,11 @@ router.get('/search', authenticate, async (req: AuthRequest, res: Response): Pro
 });
 
 router.put('/profile', authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
-  const { name, currency, avatarColor, avatar_color } = req.body;
+  const { name, currency, avatarColor, avatar_color, phone } = req.body;
   const colorValue = avatarColor || avatar_color;
+  const normalizedPhone = phone !== undefined
+    ? (phone === '' ? null : phone.replace(/[^\d+]/g, '') || null)
+    : undefined;
 
   try {
     const updated = await prisma.user.update({
@@ -42,6 +45,7 @@ router.put('/profile', authenticate, async (req: AuthRequest, res: Response): Pr
         ...(name ? { name } : {}),
         ...(currency ? { currency } : {}),
         ...(colorValue ? { avatarColor: colorValue } : {}),
+        ...(normalizedPhone !== undefined ? { phone: normalizedPhone } : {}),
       },
     });
 

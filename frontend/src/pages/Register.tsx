@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { DollarSign, Eye, EyeOff } from 'lucide-react';
+import { DollarSign, Eye, EyeOff, Phone } from 'lucide-react';
 import api from '../api/client';
 import useAuthStore from '../store/useAuthStore';
 
 export default function Register() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -25,7 +26,7 @@ export default function Register() {
 
     setLoading(true);
     try {
-      const res = await api.post('/auth/register', { name, email, password });
+      const res = await api.post('/auth/register', { name, email, password, phone: phone || undefined });
       login(res.data.token, res.data.user);
       navigate('/', { replace: true });
     } catch (err: any) {
@@ -79,6 +80,22 @@ export default function Register() {
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none text-sm"
                 required
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Telefono <span className="text-gray-400 font-normal text-xs">(opzionale)</span>
+              </label>
+              <div className="relative">
+                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="tel"
+                  value={phone}
+                  onChange={e => setPhone(e.target.value)}
+                  placeholder="+39 333 1234567"
+                  className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none text-sm"
+                />
+              </div>
             </div>
 
             <div>

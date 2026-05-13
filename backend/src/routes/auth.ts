@@ -11,6 +11,7 @@ const registerSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1),
   password: z.string().min(8),
+  phone: z.string().optional(),
 });
 
 const loginSchema = z.object({
@@ -30,7 +31,8 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  const { email, name, password } = parsed.data;
+  const { email, name, password, phone } = parsed.data;
+  const normalizedPhone = phone ? phone.replace(/[^\d+]/g, '') || undefined : undefined;
 
   try {
     const existing = await prisma.user.findUnique({ where: { email } });
@@ -44,7 +46,7 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
     const avatarColor = colors[Math.floor(Math.random() * colors.length)];
 
     const user = await prisma.user.create({
-      data: { email, passwordHash, name, avatarColor },
+      data: { email, passwordHash, name, avatarColor, ...(normalizedPhone ? { phone: normalizedPhone } : {}) },
     });
 
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '30d' });

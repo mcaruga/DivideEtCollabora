@@ -3,7 +3,7 @@ import api from '../api/client';
 import {
   Users, BarChart2, Globe, Shield, Trash2, ChevronLeft, ChevronRight,
   Search, CheckCircle, XCircle, Crown, AlertTriangle, RefreshCw,
-  Mail, Send, X, UserPlus, DollarSign, ArrowUpDown, ChevronDown,
+  Mail, Send, X, UserPlus, DollarSign, ArrowUpDown, Phone,
 } from 'lucide-react';
 
 /* ─── Types ─────────────────────────────────────────────── */
@@ -14,7 +14,7 @@ interface AdminStats {
 interface AdminUser {
   id: number; email: string; name: string; avatar_color: string;
   is_premium: boolean; is_admin: boolean; is_active: boolean;
-  created_at: string; group_count: number; expense_count: number;
+  phone?: string; created_at: string; group_count: number; expense_count: number;
 }
 interface AdminGroup {
   id: number; name: string; type: string; cover_color: string;
@@ -34,6 +34,11 @@ function useDebounce<T>(value: T, ms: number): T {
 }
 
 function isEmailLike(s: string) { return /^[^\s@]+@[^\s@]+/.test(s); }
+function isPhoneLike(s: string) { return /^[+\d][\d\s\-().]{5,}$/.test(s.trim()); }
+function formatPhone(p: string) {
+  const d = p.replace(/\D/g, '');
+  return d.startsWith('39') ? `+${d}` : p.startsWith('+') ? p : `+${d}`;
+}
 
 function StatCard({ icon: Icon, label, value, color }: {
   icon: React.ElementType; label: string; value: string | number; color: string;
@@ -172,11 +177,147 @@ function InviteModal({ prefillEmail, onClose }: { prefillEmail: string; onClose:
   );
 }
 
-/* ─── User Row ───────────────────────────────────────────── */
-function UserRow({ u, onPatch, onDelete }: {
+/* ─── WhatsApp Invite Modal ──────────────────────────────── */
+function WhatsAppModal({ prefillPhone, onClose }: { prefillPhone: string; onClose: () => void }) {
+  const [phone, setPhone] = useState(prefillPhone);
+  const [message, setMessage] = useState('');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'exists' | 'error'>('idle');
+  const [waUrl, setWaUrl] = useState('');
+  const [errMsg, setErrMsg] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const prepare = async () => {
+    setStatus('loading');
+    try {
+      const res = await api.post('/admin/users/invite-whatsapp', {
+        phone,
+        message: message || undefined,
+      });
+      setWaUrl(res.data.whatsappUrl);
+      setStatus('ready');
+    } catch (e: any) {
+      if (e.response?.status === 409) setStatus('exists');
+      else { setStatus('error'); setErrMsg(e.response?.data?.error || 'Errore'); }
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+        <div className="flex items-center justify-between p-5 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-green-50 rounded-lg flex items-center justify-center">
+              <Phone className="w-4 h-4 text-green-600" />
+            </div>
+            <h2 className="font-semibold text-gray-900">Invita via WhatsApp</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-5">
+          {status === 'ready' ? (
+            <div className="text-center py-4">
+              <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                <Phone className="w-7 h-7 text-green-600" />
+              </div>
+              <p className="font-semibold text-gray-900 text-lg mb-1">Pronto!</p>
+              <p className="text-gray-500 text-sm mb-5">
+                Clicca il bottone per aprire WhatsApp con il messaggio precompilato.
+              </p>
+              <a
+                href={waUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={onClose}
+                className="inline-flex items-center gap-2 px-6 py-3 bg-green-500 text-white rounded-xl text-sm font-semibold hover:bg-green-600 transition-colors"
+              >
+                <Phone className="w-4 h-4" />
+                Apri WhatsApp
+              </a>
+              <button onClick={onClose} className="block mx-auto mt-3 text-sm text-gray-400 hover:text-gray-600">
+                Annulla
+              </button>
+            </div>
+          ) : status === 'exists' ? (
+            <div className="text-center py-4">
+              <div className="w-14 h-14 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                <AlertTriangle className="w-7 h-7 text-amber-600" />
+              </div>
+              <p className="font-semibold text-gray-900">Numero già registrato</p>
+              <p className="text-gray-500 text-sm mt-1">Questo numero è già associato a un account.</p>
+              <button onClick={onClose} className="mt-5 px-6 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300">
+                Chiudi
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Numero di telefono <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      ref={inputRef}
+                      type="tel"
+                      value={phone}
+                      onChange={e => setPhone(e.target.value)}
+                      placeholder="+39 333 1234567"
+                      className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                    />
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">Includi il prefisso internazionale (es. +39 per Italia)</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Messaggio personalizzato <span className="text-gray-400 font-normal">(opzionale)</span>
+                  </label>
+                  <textarea
+                    value={message}
+                    onChange={e => setMessage(e.target.value)}
+                    placeholder="Lascia vuoto per usare il messaggio predefinito..."
+                    rows={3}
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
+                  />
+                </div>
+                {status === 'error' && (
+                  <p className="text-red-500 text-sm bg-red-50 px-3 py-2 rounded-lg">{errMsg}</p>
+                )}
+              </div>
+              <div className="flex gap-3 mt-5">
+                <button onClick={onClose} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
+                  Annulla
+                </button>
+                <button
+                  onClick={prepare}
+                  disabled={!phone || status === 'loading'}
+                  className="flex-1 py-2.5 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {status === 'loading'
+                    ? <RefreshCw className="w-4 h-4 animate-spin" />
+                    : <><Phone className="w-4 h-4" /> Prepara messaggio</>
+                  }
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function UserRow({ u, onPatch, onDelete, onWhatsApp }: {
   u: AdminUser;
   onPatch: (id: number, patch: Partial<AdminUser>) => void;
   onDelete: (id: number) => void;
+  onWhatsApp: (phone: string) => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -194,6 +335,11 @@ function UserRow({ u, onPatch, onDelete }: {
           <div className="min-w-0">
             <p className="font-medium text-gray-900 truncate">{u.name}</p>
             <p className="text-xs text-gray-500 truncate">{u.email}</p>
+            {u.phone && (
+              <p className="text-xs text-gray-400 truncate flex items-center gap-1 mt-0.5">
+                <Phone className="w-3 h-3" />{u.phone}
+              </p>
+            )}
           </div>
         </div>
       </td>
@@ -210,6 +356,20 @@ function UserRow({ u, onPatch, onDelete }: {
         <span className="text-xs text-gray-500">
           {new Date(u.created_at).toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' })}
         </span>
+      </td>
+      {/* WhatsApp */}
+      <td className="px-3 py-3 text-center hidden sm:table-cell">
+        {u.phone ? (
+          <button
+            onClick={() => onWhatsApp(u.phone!)}
+            title={`Apri WhatsApp con ${u.phone}`}
+            className="inline-flex items-center justify-center w-8 h-8 rounded-full text-green-500 bg-green-50 hover:bg-green-100 transition-colors"
+          >
+            <Phone className="w-4 h-4" />
+          </button>
+        ) : (
+          <span className="text-gray-200 text-xs">—</span>
+        )}
       </td>
       {/* Premium toggle */}
       <td className="px-3 py-3 text-center">
@@ -289,9 +449,12 @@ export default function Admin() {
   const [groupTotal, setGroupTotal] = useState(0);
   const [groupPage, setGroupPage] = useState(1);
 
-  // Invite
+  // Invite email
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
+  // Invite WhatsApp
+  const [waOpen, setWaOpen] = useState(false);
+  const [waPhone, setWaPhone] = useState('');
 
   // Load stats
   useEffect(() => {
@@ -345,6 +508,7 @@ export default function Admin() {
   };
 
   const openInvite = (email = '') => { setInviteEmail(email); setInviteOpen(true); };
+  const openWhatsApp = (phone = '') => { setWaPhone(phone); setWaOpen(true); };
 
   const tabs = [
     { key: 'overview' as Tab, label: 'Panoramica', icon: BarChart2 },
@@ -432,9 +596,18 @@ export default function Admin() {
             <button
               onClick={() => openInvite(isEmailLike(search) ? search : '')}
               className="flex items-center gap-2 px-4 py-2.5 border border-emerald-300 text-emerald-700 bg-emerald-50 rounded-lg text-sm font-medium hover:bg-emerald-100 transition-colors"
+              title="Invita via email"
             >
-              <UserPlus className="w-4 h-4" />
-              <span className="hidden sm:inline">Invita</span>
+              <Mail className="w-4 h-4" />
+              <span className="hidden sm:inline">Email</span>
+            </button>
+            <button
+              onClick={() => openWhatsApp(isPhoneLike(search) ? search : '')}
+              className="flex items-center gap-2 px-4 py-2.5 border border-green-300 text-green-700 bg-green-50 rounded-lg text-sm font-medium hover:bg-green-100 transition-colors"
+              title="Invita via WhatsApp"
+            >
+              <Phone className="w-4 h-4" />
+              <span className="hidden sm:inline">WhatsApp</span>
             </button>
           </div>
 
@@ -464,21 +637,37 @@ export default function Admin() {
                     className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-600 transition-colors"
                   >
                     <Mail className="w-4 h-4" />
-                    Invita {debouncedSearch}
+                    Invita via email
+                  </button>
+                </>
+              ) : isPhoneLike(debouncedSearch) ? (
+                <>
+                  <p className="text-sm text-gray-500 mb-4">
+                    Nessun utente registrato con questo numero. Vuoi invitarlo via WhatsApp?
+                  </p>
+                  <button
+                    onClick={() => openWhatsApp(debouncedSearch)}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 transition-colors"
+                  >
+                    <Phone className="w-4 h-4" />
+                    Invita via WhatsApp
                   </button>
                 </>
               ) : (
                 <>
                   <p className="text-sm text-gray-500 mb-4">
-                    Nessun nome corrisponde. Se vuoi invitare qualcuno, cerca per indirizzo email.
+                    Cerca per email o numero di telefono per invitare qualcuno.
                   </p>
-                  <button
-                    onClick={() => openInvite()}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors"
-                  >
-                    <UserPlus className="w-4 h-4" />
-                    Invita per email
-                  </button>
+                  <div className="flex gap-3 justify-center">
+                    <button onClick={() => openInvite()}
+                      className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-100">
+                      <Mail className="w-4 h-4" /> Invita via email
+                    </button>
+                    <button onClick={() => openWhatsApp()}
+                      className="inline-flex items-center gap-2 px-4 py-2 border border-green-300 text-green-700 bg-green-50 rounded-lg text-sm font-medium hover:bg-green-100">
+                      <Phone className="w-4 h-4" /> Invita via WhatsApp
+                    </button>
+                  </div>
                 </>
               )}
             </div>
@@ -501,6 +690,9 @@ export default function Admin() {
                       <button onClick={() => toggleSort('createdAt')} className="flex items-center gap-1 text-gray-600 font-medium hover:text-gray-900">
                         Registrato <ArrowUpDown className="w-3 h-3" />
                       </button>
+                    </th>
+                    <th className="text-center px-3 py-3 hidden sm:table-cell">
+                      <span title="WhatsApp" className="flex justify-center"><Phone className="w-4 h-4 text-green-400" /></span>
                     </th>
                     <th className="text-center px-3 py-3">
                       <span title="Premium" className="flex justify-center"><Crown className="w-4 h-4 text-amber-400" /></span>
@@ -526,7 +718,7 @@ export default function Admin() {
                         </tr>
                       ))
                     : users.map(u => (
-                        <UserRow key={u.id} u={u} onPatch={patchUser} onDelete={deleteUser} />
+                        <UserRow key={u.id} u={u} onPatch={patchUser} onDelete={deleteUser} onWhatsApp={openWhatsApp} />
                       ))
                   }
                 </tbody>
@@ -634,8 +826,9 @@ export default function Admin() {
         </div>
       </div>
 
-      {/* Invite Modal */}
+      {/* Modals */}
       {inviteOpen && <InviteModal prefillEmail={inviteEmail} onClose={() => setInviteOpen(false)} />}
+      {waOpen && <WhatsAppModal prefillPhone={waPhone} onClose={() => setWaOpen(false)} />}
     </div>
   );
 }

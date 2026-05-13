@@ -16,6 +16,7 @@ model User {
   isPremium    Boolean  @default(false) @map("is_premium")
   isAdmin      Boolean  @default(false) @map("is_admin")
   isActive     Boolean  @default(true) @map("is_active")
+  phone        String?  @unique
   createdAt    DateTime @default(now()) @map("created_at")
 
   groupsCreated   Group[]        @relation("GroupCreator")
