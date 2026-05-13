@@ -11,6 +11,7 @@
     "db:push": "prisma db push"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^1.41.3",
