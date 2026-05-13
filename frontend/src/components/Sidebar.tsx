@@ -8,6 +8,7 @@ import {
   Settings,
   LogOut,
   DollarSign,
+  Shield,
 } from 'lucide-react';
 import useAuthStore from '../store/useAuthStore';
 
@@ -26,10 +27,11 @@ export default function Sidebar({ onClose }: SidebarProps) {
 
   const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
-    { to: '/groups', icon: Users, label: 'Groups' },
+    { to: '/groups', icon: Users, label: 'Gruppi' },
     { to: '/analytics', icon: BarChart2, label: 'Analytics' },
     { to: '/premium', icon: Star, label: 'Premium' },
-    { to: '/settings', icon: Settings, label: 'Settings' },
+    { to: '/settings', icon: Settings, label: 'Impostazioni' },
+    ...(user?.is_admin ? [{ to: '/admin', icon: Shield, label: 'Admin' }] : []),
   ];
 
   return (

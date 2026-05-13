@@ -5,6 +5,8 @@ export interface User {
   avatar_color: string;
   currency: string;
   is_premium: boolean;
+  is_admin?: boolean;
+  is_active?: boolean;
   created_at: string;
 }
 

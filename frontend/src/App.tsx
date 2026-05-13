@@ -11,6 +11,7 @@ import GroupDetail from './pages/GroupDetail';
 import Analytics from './pages/Analytics';
 import Premium from './pages/Premium';
 import Settings from './pages/Settings';
+import Admin from './pages/Admin';
 
 function App() {
   const { token } = useAuthStore();
@@ -34,6 +35,7 @@ function App() {
           <Route path="analytics" element={<Analytics />} />
           <Route path="premium" element={<Premium />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="admin" element={<Admin />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
