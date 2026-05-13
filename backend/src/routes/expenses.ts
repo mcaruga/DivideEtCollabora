@@ -1,47 +1,45 @@
 import { Router, Response } from 'express';
-import multer from 'multer';
-import path from 'path';
-import db from '../database';
+import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
-
-const storage = multer.diskStorage({
-  destination: path.join(__dirname, '..', '..', 'uploads'),
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
-});
-const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
+import { upload } from '../lib/cloudinary';
+import { sendExpenseNotification } from '../lib/email';
 
 const router = Router();
 
-router.get('/group/:groupId', authenticate, (req: AuthRequest, res: Response): void => {
+router.get('/group/:groupId', authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
   const groupId = parseInt(req.params.groupId);
 
   try {
-    const member = db.prepare('SELECT * FROM group_members WHERE group_id = ? AND user_id = ?').get(groupId, req.userId);
+    const member = await prisma.groupMember.findUnique({
+      where: { groupId_userId: { groupId, userId: req.userId! } },
+    });
     if (!member) {
       res.status(403).json({ error: 'Not a member of this group' });
       return;
     }
 
-    const expenses = db.prepare(`
-      SELECT e.*, u.name as paid_by_name
-      FROM expenses e
-      JOIN users u ON e.paid_by = u.id
-      WHERE e.group_id = ?
-      ORDER BY e.date DESC, e.created_at DESC
-    `).all(groupId) as any[];
-
-    const result = expenses.map(expense => {
-      const splits = db.prepare(`
-        SELECT es.*, u.name as user_name
-        FROM expense_splits es
-        JOIN users u ON es.user_id = u.id
-        WHERE es.expense_id = ?
-      `).all(expense.id) as any[];
-      return { ...expense, splits, is_recurring: Boolean(expense.is_recurring) };
+    const expenses = await prisma.expense.findMany({
+      where: { groupId },
+      include: {
+        paidBy: { select: { id: true, name: true } },
+        splits: {
+          include: { user: { select: { id: true, name: true } } },
+        },
+      },
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     });
+
+    const result = expenses.map(expense => ({
+      ...expense,
+      paid_by_name: expense.paidBy.name,
+      splits: expense.splits.map(s => ({
+        id: s.id,
+        expense_id: s.expenseId,
+        user_id: s.userId,
+        amount: s.amount,
+        user_name: s.user.name,
+      })),
+    }));
 
     res.json(result);
   } catch (err: any) {
@@ -49,20 +47,28 @@ router.get('/group/:groupId', authenticate, (req: AuthRequest, res: Response): v
   }
 });
 
-router.post('/', authenticate, upload.single('receipt'), (req: AuthRequest, res: Response): void => {
+router.post('/', authenticate, upload.single('receipt'), async (req: AuthRequest, res: Response): Promise<void> => {
   const {
-    group_id, description, amount, currency, paid_by,
-    split_type, splits, category, date, notes, is_recurring, recur_interval
+    group_id, groupId: groupIdBody, description, amount, currency, paid_by, paidById: paidByIdBody,
+    split_type, splitType, splits, category, date, notes, is_recurring, isRecurring, recur_interval, recurInterval,
   } = req.body;
 
-  if (!description || !amount || !paid_by || !date) {
+  const resolvedGroupId = group_id || groupIdBody;
+  const resolvedPaidById = paid_by || paidByIdBody;
+  const resolvedSplitType = split_type || splitType;
+  const resolvedIsRecurring = is_recurring !== undefined ? is_recurring : isRecurring;
+  const resolvedRecurInterval = recur_interval || recurInterval;
+
+  if (!description || !amount || !resolvedPaidById || !date) {
     res.status(400).json({ error: 'Description, amount, paid_by, and date are required' });
     return;
   }
 
   try {
-    if (group_id) {
-      const member = db.prepare('SELECT * FROM group_members WHERE group_id = ? AND user_id = ?').get(group_id, req.userId);
+    if (resolvedGroupId) {
+      const member = await prisma.groupMember.findUnique({
+        where: { groupId_userId: { groupId: parseInt(resolvedGroupId), userId: req.userId! } },
+      });
       if (!member) {
         res.status(403).json({ error: 'Not a member of this group' });
         return;
@@ -70,8 +76,8 @@ router.post('/', authenticate, upload.single('receipt'), (req: AuthRequest, res:
     }
 
     const parsedAmount = parseFloat(amount);
-    const parsedSplits = typeof splits === 'string' ? JSON.parse(splits) : splits;
-    const receipt_url = req.file ? `/uploads/${req.file.filename}` : null;
+    const parsedSplits = typeof splits === 'string' ? JSON.parse(splits) : (splits || []);
+    const receiptUrl = (req.file as any)?.path || (req.file ? `/uploads/${req.file.filename}` : null);
 
     // Validate splits sum to amount
     if (parsedSplits && parsedSplits.length > 0) {
@@ -82,64 +88,99 @@ router.post('/', authenticate, upload.single('receipt'), (req: AuthRequest, res:
       }
     }
 
-    const result = db.prepare(`
-      INSERT INTO expenses (group_id, description, amount, currency, paid_by, split_type, category, date, notes, receipt_url, is_recurring, recur_interval, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      group_id || null,
-      description,
-      parsedAmount,
-      currency || 'EUR',
-      parseInt(paid_by),
-      split_type || 'equal',
-      category || 'general',
-      date,
-      notes || null,
-      receipt_url,
-      is_recurring ? 1 : 0,
-      recur_interval || null,
-      req.userId
-    );
+    const expense = await prisma.expense.create({
+      data: {
+        groupId: resolvedGroupId ? parseInt(resolvedGroupId) : null,
+        description,
+        amount: parsedAmount,
+        currency: currency || 'EUR',
+        paidById: parseInt(resolvedPaidById),
+        splitType: resolvedSplitType || 'equal',
+        category: category || 'general',
+        date: new Date(date),
+        notes: notes || null,
+        receiptUrl,
+        isRecurring: resolvedIsRecurring ? true : false,
+        recurInterval: resolvedRecurInterval || null,
+        createdById: req.userId!,
+        splits: parsedSplits && parsedSplits.length > 0 ? {
+          create: parsedSplits.map((s: any) => ({
+            userId: parseInt(s.user_id || s.userId),
+            amount: parseFloat(s.amount),
+          })),
+        } : undefined,
+      },
+      include: {
+        paidBy: { select: { id: true, name: true } },
+        splits: {
+          include: { user: { select: { id: true, name: true } } },
+        },
+      },
+    });
 
-    const expenseId = result.lastInsertRowid;
+    // Log activity
+    if (resolvedGroupId) {
+      await prisma.activity.create({
+        data: {
+          groupId: parseInt(resolvedGroupId),
+          userId: req.userId!,
+          type: 'expense_added',
+          data: { description, amount: parsedAmount, currency: currency || 'EUR' },
+        },
+      });
 
-    // Insert splits
-    if (parsedSplits && parsedSplits.length > 0) {
-      const insertSplit = db.prepare('INSERT INTO expense_splits (expense_id, user_id, amount) VALUES (?, ?, ?)');
-      for (const split of parsedSplits) {
-        insertSplit.run(expenseId, parseInt(split.user_id), parseFloat(split.amount));
+      // Send email notifications to split members (except payer) - non-blocking
+      const payer = req.user!;
+      const group = await prisma.group.findUnique({ where: { id: parseInt(resolvedGroupId) } });
+      if (group) {
+        for (const split of expense.splits) {
+          if (split.userId !== expense.paidById) {
+            const splitUser = await prisma.user.findUnique({ where: { id: split.userId } });
+            if (splitUser) {
+              sendExpenseNotification(
+                splitUser.email,
+                splitUser.name,
+                payer.name,
+                group.name,
+                description,
+                parsedAmount,
+                currency || 'EUR',
+                split.amount
+              ).catch(() => {});
+            }
+          }
+        }
       }
     }
 
-    // Log activity
-    if (group_id) {
-      db.prepare('INSERT INTO activities (group_id, user_id, type, data) VALUES (?, ?, ?, ?)').run(
-        group_id, req.userId, 'expense_added', JSON.stringify({ description, amount: parsedAmount, currency: currency || 'EUR' })
-      );
-    }
-
-    const expense = db.prepare(`
-      SELECT e.*, u.name as paid_by_name FROM expenses e
-      JOIN users u ON e.paid_by = u.id WHERE e.id = ?
-    `).get(expenseId) as any;
-
-    const expenseSplits = db.prepare(`
-      SELECT es.*, u.name as user_name FROM expense_splits es
-      JOIN users u ON es.user_id = u.id WHERE es.expense_id = ?
-    `).all(expenseId);
-
-    res.status(201).json({ ...expense, splits: expenseSplits, is_recurring: Boolean(expense.is_recurring) });
+    res.status(201).json({
+      ...expense,
+      paid_by_name: expense.paidBy.name,
+      splits: expense.splits.map(s => ({
+        id: s.id,
+        expense_id: s.expenseId,
+        user_id: s.userId,
+        amount: s.amount,
+        user_name: s.user.name,
+      })),
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.put('/:id', authenticate, upload.single('receipt'), (req: AuthRequest, res: Response): void => {
+router.put('/:id', authenticate, upload.single('receipt'), async (req: AuthRequest, res: Response): Promise<void> => {
   const expenseId = parseInt(req.params.id);
-  const { description, amount, currency, paid_by, split_type, splits, category, date, notes, is_recurring, recur_interval } = req.body;
+  const {
+    description, amount, currency, paid_by, paidById: paidByIdBody,
+    split_type, splitType, splits, category, date, notes,
+    is_recurring, isRecurring, recur_interval, recurInterval,
+  } = req.body;
 
   try {
-    const expense = db.prepare('SELECT * FROM expenses WHERE id = ? AND created_by = ?').get(expenseId, req.userId) as any;
+    const expense = await prisma.expense.findFirst({
+      where: { id: expenseId, createdById: req.userId },
+    });
     if (!expense) {
       res.status(403).json({ error: 'Not authorized to update this expense' });
       return;
@@ -147,63 +188,76 @@ router.put('/:id', authenticate, upload.single('receipt'), (req: AuthRequest, re
 
     const parsedAmount = amount ? parseFloat(amount) : expense.amount;
     const parsedSplits = splits ? (typeof splits === 'string' ? JSON.parse(splits) : splits) : null;
-    const receipt_url = req.file ? `/uploads/${req.file.filename}` : expense.receipt_url;
-
-    db.prepare(`
-      UPDATE expenses SET description = ?, amount = ?, currency = ?, paid_by = ?,
-      split_type = ?, category = ?, date = ?, notes = ?, receipt_url = ?,
-      is_recurring = ?, recur_interval = ? WHERE id = ?
-    `).run(
-      description || expense.description,
-      parsedAmount,
-      currency || expense.currency,
-      paid_by ? parseInt(paid_by) : expense.paid_by,
-      split_type || expense.split_type,
-      category || expense.category,
-      date || expense.date,
-      notes !== undefined ? notes : expense.notes,
-      receipt_url,
-      is_recurring !== undefined ? (is_recurring ? 1 : 0) : expense.is_recurring,
-      recur_interval !== undefined ? recur_interval : expense.recur_interval,
-      expenseId
-    );
+    const receiptUrl = (req.file as any)?.path || (req.file ? `/uploads/${req.file.filename}` : expense.receiptUrl);
+    const resolvedPaidById = paid_by || paidByIdBody;
+    const resolvedSplitType = split_type || splitType;
+    const resolvedIsRecurring = is_recurring !== undefined ? is_recurring : isRecurring;
+    const resolvedRecurInterval = recur_interval !== undefined ? recur_interval : recurInterval;
 
     if (parsedSplits && parsedSplits.length > 0) {
-      db.prepare('DELETE FROM expense_splits WHERE expense_id = ?').run(expenseId);
-      const insertSplit = db.prepare('INSERT INTO expense_splits (expense_id, user_id, amount) VALUES (?, ?, ?)');
-      for (const split of parsedSplits) {
-        insertSplit.run(expenseId, parseInt(split.user_id), parseFloat(split.amount));
-      }
+      await prisma.expenseSplit.deleteMany({ where: { expenseId } });
     }
 
-    const updated = db.prepare(`
-      SELECT e.*, u.name as paid_by_name FROM expenses e
-      JOIN users u ON e.paid_by = u.id WHERE e.id = ?
-    `).get(expenseId) as any;
+    const updated = await prisma.expense.update({
+      where: { id: expenseId },
+      data: {
+        ...(description ? { description } : {}),
+        amount: parsedAmount,
+        ...(currency ? { currency } : {}),
+        ...(resolvedPaidById ? { paidById: parseInt(resolvedPaidById) } : {}),
+        ...(resolvedSplitType ? { splitType: resolvedSplitType } : {}),
+        ...(category ? { category } : {}),
+        ...(date ? { date: new Date(date) } : {}),
+        ...(notes !== undefined ? { notes } : {}),
+        receiptUrl,
+        ...(resolvedIsRecurring !== undefined ? { isRecurring: Boolean(resolvedIsRecurring) } : {}),
+        ...(resolvedRecurInterval !== undefined ? { recurInterval: resolvedRecurInterval } : {}),
+        ...(parsedSplits && parsedSplits.length > 0 ? {
+          splits: {
+            create: parsedSplits.map((s: any) => ({
+              userId: parseInt(s.user_id || s.userId),
+              amount: parseFloat(s.amount),
+            })),
+          },
+        } : {}),
+      },
+      include: {
+        paidBy: { select: { id: true, name: true } },
+        splits: {
+          include: { user: { select: { id: true, name: true } } },
+        },
+      },
+    });
 
-    const updatedSplits = db.prepare(`
-      SELECT es.*, u.name as user_name FROM expense_splits es
-      JOIN users u ON es.user_id = u.id WHERE es.expense_id = ?
-    `).all(expenseId);
-
-    res.json({ ...updated, splits: updatedSplits, is_recurring: Boolean(updated.is_recurring) });
+    res.json({
+      ...updated,
+      paid_by_name: updated.paidBy.name,
+      splits: updated.splits.map(s => ({
+        id: s.id,
+        expense_id: s.expenseId,
+        user_id: s.userId,
+        amount: s.amount,
+        user_name: s.user.name,
+      })),
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.delete('/:id', authenticate, (req: AuthRequest, res: Response): void => {
+router.delete('/:id', authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
   const expenseId = parseInt(req.params.id);
 
   try {
-    const expense = db.prepare('SELECT * FROM expenses WHERE id = ? AND created_by = ?').get(expenseId, req.userId);
+    const expense = await prisma.expense.findFirst({
+      where: { id: expenseId, createdById: req.userId },
+    });
     if (!expense) {
       res.status(403).json({ error: 'Not authorized to delete this expense' });
       return;
     }
 
-    db.prepare('DELETE FROM expense_splits WHERE expense_id = ?').run(expenseId);
-    db.prepare('DELETE FROM expenses WHERE id = ?').run(expenseId);
+    await prisma.expense.delete({ where: { id: expenseId } });
 
     res.json({ message: 'Expense deleted' });
   } catch (err: any) {

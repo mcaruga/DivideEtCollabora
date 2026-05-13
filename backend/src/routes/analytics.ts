@@ -1,40 +1,47 @@
 import { Router, Response } from 'express';
-import db from '../database';
+import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
-// Middleware to check premium
 function requirePremium(req: AuthRequest, res: Response, next: any): void {
-  if (!req.user || !req.user.is_premium) {
+  if (!req.user?.isPremium) {
     res.status(403).json({ error: 'Premium subscription required' });
     return;
   }
   next();
 }
 
-router.get('/spending', authenticate, requirePremium, (req: AuthRequest, res: Response): void => {
+router.get('/spending', authenticate, requirePremium, async (req: AuthRequest, res: Response): Promise<void> => {
   const { groupId, period } = req.query;
   const months = period === '12' ? 12 : period === '6' ? 6 : 3;
 
   try {
-    let query = `
-      SELECT strftime('%Y-%m', e.date) as month, SUM(es.amount) as total
-      FROM expenses e
-      JOIN expense_splits es ON e.id = es.expense_id
-      WHERE es.user_id = ?
-      AND e.date >= date('now', '-${months} months')
-    `;
-    const params: any[] = [req.userId];
+    const since = new Date();
+    since.setMonth(since.getMonth() - months);
+
+    const where: any = {
+      userId: req.userId,
+      expense: {
+        date: { gte: since },
+      },
+    };
 
     if (groupId) {
-      query += ' AND e.group_id = ?';
-      params.push(parseInt(groupId as string));
+      where.expense.groupId = parseInt(groupId as string);
     }
 
-    query += ' GROUP BY month ORDER BY month ASC';
+    const splits = await prisma.expenseSplit.findMany({
+      where,
+      include: { expense: { select: { date: true } } },
+    });
 
-    const data = db.prepare(query).all(...params) as { month: string; total: number }[];
+    // Group by month
+    const monthMap: Record<string, number> = {};
+    for (const split of splits) {
+      const month = split.expense.date.toISOString().slice(0, 7);
+      monthMap[month] = (monthMap[month] || 0) + split.amount;
+    }
 
     // Fill in missing months with 0
     const result: { month: string; total: number }[] = [];
@@ -42,8 +49,7 @@ router.get('/spending', authenticate, requirePremium, (req: AuthRequest, res: Re
       const d = new Date();
       d.setMonth(d.getMonth() - i);
       const monthStr = d.toISOString().slice(0, 7);
-      const found = data.find(d => d.month === monthStr);
-      result.push({ month: monthStr, total: found ? Math.round(found.total * 100) / 100 : 0 });
+      result.push({ month: monthStr, total: Math.round((monthMap[monthStr] || 0) * 100) / 100 });
     }
 
     res.json(result);
@@ -52,109 +58,79 @@ router.get('/spending', authenticate, requirePremium, (req: AuthRequest, res: Re
   }
 });
 
-router.get('/categories', authenticate, requirePremium, (req: AuthRequest, res: Response): void => {
+router.get('/categories', authenticate, requirePremium, async (req: AuthRequest, res: Response): Promise<void> => {
   const { groupId } = req.query;
 
   try {
-    let query = `
-      SELECT e.category, SUM(es.amount) as total
-      FROM expenses e
-      JOIN expense_splits es ON e.id = es.expense_id
-      WHERE es.user_id = ?
-      AND e.date >= date('now', '-12 months')
-    `;
-    const params: any[] = [req.userId];
+    const since = new Date();
+    since.setFullYear(since.getFullYear() - 1);
+
+    const where: any = {
+      userId: req.userId,
+      expense: {
+        date: { gte: since },
+      },
+    };
 
     if (groupId) {
-      query += ' AND e.group_id = ?';
-      params.push(parseInt(groupId as string));
+      where.expense.groupId = parseInt(groupId as string);
     }
 
-    query += ' GROUP BY e.category ORDER BY total DESC';
+    const splits = await prisma.expenseSplit.findMany({
+      where,
+      include: { expense: { select: { category: true } } },
+    });
 
-    const data = db.prepare(query).all(...params) as { category: string; total: number }[];
-    res.json(data.map(d => ({ ...d, total: Math.round(d.total * 100) / 100 })));
+    const categoryMap: Record<string, number> = {};
+    for (const split of splits) {
+      const cat = split.expense.category;
+      categoryMap[cat] = (categoryMap[cat] || 0) + split.amount;
+    }
+
+    const result = Object.entries(categoryMap)
+      .map(([category, total]) => ({ category, total: Math.round(total * 100) / 100 }))
+      .sort((a, b) => b.total - a.total);
+
+    res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.get('/per-person', authenticate, requirePremium, (req: AuthRequest, res: Response): void => {
+router.get('/export/csv', authenticate, requirePremium, async (req: AuthRequest, res: Response): Promise<void> => {
   const { groupId } = req.query;
 
   try {
-    let query = `
-      SELECT u.name, u.id, SUM(es.amount) as total
-      FROM expenses e
-      JOIN expense_splits es ON e.id = es.expense_id
-      JOIN users u ON es.user_id = u.id
-      WHERE e.date >= date('now', '-12 months')
-    `;
-    const params: any[] = [];
-
+    let memberCheck = null;
     if (groupId) {
-      query += ' AND e.group_id = ?';
-      params.push(parseInt(groupId as string));
-
-      // Ensure requester is a member
-      const member = db.prepare('SELECT * FROM group_members WHERE group_id = ? AND user_id = ?').get(parseInt(groupId as string), req.userId);
-      if (!member) {
+      memberCheck = await prisma.groupMember.findUnique({
+        where: { groupId_userId: { groupId: parseInt(groupId as string), userId: req.userId! } },
+      });
+      if (!memberCheck) {
         res.status(403).json({ error: 'Not a member of this group' });
         return;
       }
-    } else {
-      // Only show groups user is in
-      query += ` AND e.group_id IN (SELECT group_id FROM group_members WHERE user_id = ?)`;
-      params.push(req.userId);
     }
 
-    query += ' GROUP BY u.id, u.name ORDER BY total DESC';
+    const where: any = groupId
+      ? { groupId: parseInt(groupId as string) }
+      : { group: { members: { some: { userId: req.userId } } } };
 
-    const data = db.prepare(query).all(...params) as { name: string; id: number; total: number }[];
-    res.json(data.map(d => ({ ...d, total: Math.round(d.total * 100) / 100 })));
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get('/export/csv', authenticate, requirePremium, (req: AuthRequest, res: Response): void => {
-  const { groupId } = req.query;
-
-  try {
-    let query = `
-      SELECT e.date, e.description, e.amount, e.currency, e.category,
-             u.name as paid_by_name, e.split_type
-      FROM expenses e
-      JOIN users u ON e.paid_by = u.id
-    `;
-    const params: any[] = [];
-
-    if (groupId) {
-      const member = db.prepare('SELECT * FROM group_members WHERE group_id = ? AND user_id = ?').get(parseInt(groupId as string), req.userId);
-      if (!member) {
-        res.status(403).json({ error: 'Not a member of this group' });
-        return;
-      }
-      query += ' WHERE e.group_id = ?';
-      params.push(parseInt(groupId as string));
-    } else {
-      query += ` WHERE e.group_id IN (SELECT group_id FROM group_members WHERE user_id = ?)`;
-      params.push(req.userId);
-    }
-
-    query += ' ORDER BY e.date DESC';
-
-    const expenses = db.prepare(query).all(...params) as any[];
+    const expenses = await prisma.expense.findMany({
+      where,
+      include: { paidBy: { select: { name: true } } },
+      orderBy: { date: 'desc' },
+    });
 
     const headers = ['Date', 'Description', 'Amount', 'Currency', 'Category', 'Paid By', 'Split Type'];
     const rows = expenses.map(e => [
-      e.date,
+      e.date.toISOString().slice(0, 10),
       `"${e.description.replace(/"/g, '""')}"`,
       e.amount,
       e.currency,
       e.category,
-      `"${e.paid_by_name.replace(/"/g, '""')}"`,
-      e.split_type
+      `"${e.paidBy.name.replace(/"/g, '""')}"`,
+      e.splitType,
     ]);
 
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');

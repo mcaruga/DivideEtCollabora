@@ -1,15 +1,26 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import db from '../database';
+import prisma from '../lib/prisma';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'splitwise-secret-key-change-in-production';
 
 export interface AuthRequest extends Request {
   userId?: number;
-  user?: any;
+  user?: {
+    id: number;
+    email: string;
+    passwordHash: string;
+    name: string;
+    avatarColor: string;
+    currency: string;
+    isPremium: boolean;
+    isAdmin: boolean;
+    isActive: boolean;
+    createdAt: Date;
+  };
 }
 
-export function authenticate(req: AuthRequest, res: Response, next: NextFunction): void {
+export async function authenticate(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     res.status(401).json({ error: 'No token provided' });
@@ -21,7 +32,7 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
     const decoded = jwt.verify(token, JWT_SECRET) as { userId: number };
     req.userId = decoded.userId;
 
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(decoded.userId) as any;
+    const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
     if (!user) {
       res.status(401).json({ error: 'User not found' });
       return;

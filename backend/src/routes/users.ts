@@ -1,10 +1,15 @@
 import { Router, Response } from 'express';
-import db from '../database';
+import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
-router.get('/search', authenticate, (req: AuthRequest, res: Response): void => {
+function formatUser(user: any) {
+  const { passwordHash, ...rest } = user;
+  return rest;
+}
+
+router.get('/search', authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
   const q = req.query.q as string;
   if (!q || q.length < 2) {
     res.status(400).json({ error: 'Query must be at least 2 characters' });
@@ -12,54 +17,48 @@ router.get('/search', authenticate, (req: AuthRequest, res: Response): void => {
   }
 
   try {
-    const users = db.prepare(
-      'SELECT id, email, name, avatar_color, currency, is_premium, created_at FROM users WHERE email LIKE ? AND id != ? LIMIT 10'
-    ).all(`%${q}%`, req.userId) as any[];
+    const users = await prisma.user.findMany({
+      where: {
+        email: { contains: q, mode: 'insensitive' },
+        id: { not: req.userId },
+      },
+      take: 10,
+    });
 
-    res.json(users.map(u => ({ ...u, is_premium: Boolean(u.is_premium) })));
+    res.json(users.map(formatUser));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.put('/profile', authenticate, (req: AuthRequest, res: Response): void => {
-  const { name, currency, avatar_color } = req.body;
+router.put('/profile', authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
+  const { name, currency, avatarColor, avatar_color } = req.body;
+  const colorValue = avatarColor || avatar_color;
 
   try {
-    if (name) {
-      db.prepare('UPDATE users SET name = ? WHERE id = ?').run(name, req.userId);
-    }
-    if (currency) {
-      db.prepare('UPDATE users SET currency = ? WHERE id = ?').run(currency, req.userId);
-    }
-    if (avatar_color) {
-      db.prepare('UPDATE users SET avatar_color = ? WHERE id = ?').run(avatar_color, req.userId);
-    }
+    const updated = await prisma.user.update({
+      where: { id: req.userId },
+      data: {
+        ...(name ? { name } : {}),
+        ...(currency ? { currency } : {}),
+        ...(colorValue ? { avatarColor: colorValue } : {}),
+      },
+    });
 
-    const user = db.prepare('SELECT id, email, name, avatar_color, currency, is_premium, created_at FROM users WHERE id = ?').get(req.userId) as any;
-    res.json({ ...user, is_premium: Boolean(user.is_premium) });
+    res.json(formatUser(updated));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.post('/upgrade-premium', authenticate, (req: AuthRequest, res: Response): void => {
+router.post('/upgrade-premium', authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    db.prepare('UPDATE users SET is_premium = 1 WHERE id = ?').run(req.userId);
-    const user = db.prepare('SELECT id, email, name, avatar_color, currency, is_premium, created_at FROM users WHERE id = ?').get(req.userId) as any;
-    res.json({ ...user, is_premium: Boolean(user.is_premium) });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    const updated = await prisma.user.update({
+      where: { id: req.userId },
+      data: { isPremium: true },
+    });
 
-router.delete('/account', authenticate, (req: AuthRequest, res: Response): void => {
-  try {
-    // Remove from all groups
-    db.prepare('DELETE FROM group_members WHERE user_id = ?').run(req.userId);
-    // Delete the user
-    db.prepare('DELETE FROM users WHERE id = ?').run(req.userId);
-    res.json({ message: 'Account deleted' });
+    res.json(formatUser(updated));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
