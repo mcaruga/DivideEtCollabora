@@ -3,10 +3,8 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, BarChart, Bar
 } from 'recharts';
-import { Download, Lock, TrendingUp } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Download, TrendingUp } from 'lucide-react';
 import api from '../api/client';
-import useAuthStore from '../store/useAuthStore';
 import { Group } from '../types';
 
 const COLORS = ['#10B981', '#4F46E5', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#F97316', '#EC4899'];
@@ -28,7 +26,6 @@ interface PersonData {
 }
 
 export default function Analytics() {
-  const { user } = useAuthStore();
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [period, setPeriod] = useState<'3' | '6' | '12'>('6');
@@ -42,12 +39,8 @@ export default function Analytics() {
   }, []);
 
   useEffect(() => {
-    if (!user?.is_premium) {
-      setLoading(false);
-      return;
-    }
     loadAnalytics();
-  }, [user, selectedGroup, period]);
+  }, [selectedGroup, period]);
 
   async function loadAnalytics() {
     setLoading(true);
@@ -86,31 +79,6 @@ export default function Analytics() {
     } catch {
       // ignore
     }
-  }
-
-  if (!user?.is_premium) {
-    return (
-      <div className="p-6 max-w-5xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Analytics</h1>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-          <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Lock className="w-8 h-8 text-amber-600" />
-          </div>
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Premium Feature</h2>
-          <p className="text-gray-500 mb-6 max-w-md mx-auto">
-            Analytics with spending charts, category breakdowns, and CSV export are available with Premium.
-          </p>
-          <Link
-            to="/premium"
-            className="inline-flex items-center gap-2 px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-medium transition-colors"
-          >
-            Upgrade to Premium
-          </Link>
-        </div>
-      </div>
-    );
   }
 
   return (

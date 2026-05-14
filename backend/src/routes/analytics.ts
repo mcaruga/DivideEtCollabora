@@ -4,15 +4,7 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
-function requirePremium(req: AuthRequest, res: Response, next: any): void {
-  if (!req.user?.isPremium) {
-    res.status(403).json({ error: 'Premium subscription required' });
-    return;
-  }
-  next();
-}
-
-router.get('/spending', authenticate, requirePremium, async (req: AuthRequest, res: Response): Promise<void> => {
+router.get('/spending', authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
   const { groupId, period } = req.query;
   const months = period === '12' ? 12 : period === '6' ? 6 : 3;
 
@@ -58,7 +50,7 @@ router.get('/spending', authenticate, requirePremium, async (req: AuthRequest, r
   }
 });
 
-router.get('/categories', authenticate, requirePremium, async (req: AuthRequest, res: Response): Promise<void> => {
+router.get('/categories', authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
   const { groupId } = req.query;
 
   try {
@@ -97,7 +89,7 @@ router.get('/categories', authenticate, requirePremium, async (req: AuthRequest,
   }
 });
 
-router.get('/export/csv', authenticate, requirePremium, async (req: AuthRequest, res: Response): Promise<void> => {
+router.get('/export/csv', authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
   const { groupId } = req.query;
 
   try {

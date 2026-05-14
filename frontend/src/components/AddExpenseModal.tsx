@@ -48,8 +48,6 @@ export default function AddExpenseModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const isPremium = currentUser?.is_premium;
-
   useEffect(() => {
     initializeSplits();
   }, [splitType, amount, members]);
@@ -404,35 +402,24 @@ export default function AddExpenseModal({
             />
           </div>
 
-          {/* Receipt Upload (Premium) */}
+          {/* Receipt Upload */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
-              Receipt
-              {!isPremium && (
-                <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Premium</span>
-              )}
+            <label className="block text-sm font-medium text-gray-700 mb-1">Receipt</label>
+            <label className="flex items-center gap-2 px-3 py-2 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-emerald-400 hover:bg-emerald-50 transition-colors">
+              <Upload className="w-4 h-4 text-gray-400" />
+              <span className="text-sm text-gray-500">
+                {receiptFile ? receiptFile.name : editExpense?.receipt_url ? 'Change receipt' : 'Upload receipt (max 5MB)'}
+              </span>
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                onChange={e => setReceiptFile(e.target.files?.[0] || null)}
+                className="hidden"
+              />
             </label>
-            {isPremium ? (
-              <label className="flex items-center gap-2 px-3 py-2 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-emerald-400 hover:bg-emerald-50 transition-colors">
-                <Upload className="w-4 h-4 text-gray-400" />
-                <span className="text-sm text-gray-500">
-                  {receiptFile ? receiptFile.name : editExpense?.receipt_url ? 'Change receipt' : 'Upload receipt (max 5MB)'}
-                </span>
-                <input
-                  type="file"
-                  accept="image/*,.pdf"
-                  onChange={e => setReceiptFile(e.target.files?.[0] || null)}
-                  className="hidden"
-                />
-              </label>
-            ) : (
-              <div className="px-3 py-2 border border-dashed border-gray-200 rounded-lg bg-gray-50 text-sm text-gray-400">
-                Upgrade to Premium to attach receipts
-              </div>
-            )}
           </div>
 
-          {/* Recurring (Premium) */}
+          {/* Recurring */}
           <div>
             <div className="flex items-center gap-2">
               <input
@@ -440,18 +427,14 @@ export default function AddExpenseModal({
                 id="recurring"
                 checked={isRecurring}
                 onChange={e => setIsRecurring(e.target.checked)}
-                disabled={!isPremium}
                 className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
               />
               <label htmlFor="recurring" className="text-sm font-medium text-gray-700 flex items-center gap-2">
                 <RefreshCw className="w-4 h-4 text-gray-500" />
                 Recurring expense
-                {!isPremium && (
-                  <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Premium</span>
-                )}
               </label>
             </div>
-            {isRecurring && isPremium && (
+            {isRecurring && (
               <select
                 value={recurInterval}
                 onChange={e => setRecurInterval(e.target.value)}

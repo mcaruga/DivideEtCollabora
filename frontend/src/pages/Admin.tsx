@@ -58,253 +58,210 @@ function StatCard({ icon: Icon, label, value, color }: {
   );
 }
 
-/* ─── Invite Modal ───────────────────────────────────────── */
-function InviteModal({ prefillEmail, onClose }: { prefillEmail: string; onClose: () => void }) {
-  const [email, setEmail] = useState(prefillEmail);
+/* ─── Unified Invite Modal ───────────────────────────────── */
+function UnifiedInviteModal({ prefill, onClose }: { prefill?: string; onClose: () => void }) {
+  const [input, setInput] = useState(prefill || '');
   const [message, setMessage] = useState('');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'sent' | 'exists' | 'error'>('idle');
-  const [errMsg, setErrMsg] = useState('');
+  const [emailStatus, setEmailStatus] = useState<'idle' | 'loading' | 'sent' | 'exists' | 'error'>('idle');
+  const [emailError, setEmailError] = useState('');
+  const [copiedPlatform, setCopiedPlatform] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
-  const send = async () => {
-    setStatus('loading');
+  const isEmail = isEmailLike(input);
+  const isPhone = isPhoneLike(input.trim());
+  const inviteUrl = window.location.origin;
+  const defaultText = `Ciao! Ti invito su DivideEtCollabora per dividere le spese con semplicità. Registrati qui: ${inviteUrl}`;
+  const msgText = message.trim() || defaultText;
+
+  const sendEmail = async () => {
+    setEmailStatus('loading');
+    setEmailError('');
     try {
-      await api.post('/admin/users/invite', { email, message: message || undefined });
-      setStatus('sent');
+      await api.post('/admin/users/invite', { email: input.trim(), message: message.trim() || undefined });
+      setEmailStatus('sent');
     } catch (e: any) {
-      if (e.response?.status === 409) setStatus('exists');
-      else { setStatus('error'); setErrMsg(e.response?.data?.error || 'Errore'); }
+      if (e.response?.status === 409) setEmailStatus('exists');
+      else { setEmailStatus('error'); setEmailError(e.response?.data?.error || 'Errore imprevisto'); }
     }
   };
 
+  const handleWhatsApp = () => {
+    const digits = input.trim().replace(/[^\d]/g, '');
+    window.open(`https://wa.me/${digits}?text=${encodeURIComponent(msgText)}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleTelegram = () => {
+    const phone = input.trim().replace(/[^\d+]/g, '');
+    const normalized = phone.startsWith('+') ? phone : `+${phone}`;
+    window.open(`https://t.me/${normalized}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const copyToClipboard = async (platform: string) => {
+    try {
+      await navigator.clipboard.writeText(msgText);
+      setCopiedPlatform(platform);
+      setTimeout(() => setCopiedPlatform(''), 2000);
+    } catch { /* ignore */ }
+  };
+
+  const isDone = emailStatus === 'sent' || emailStatus === 'exists';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
-        {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-gray-100">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md flex flex-col" style={{ height: '520px' }}>
+        {/* Header – fixed */}
+        <div className="flex-shrink-0 flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center">
               <UserPlus className="w-4 h-4 text-emerald-600" />
             </div>
-            <h2 className="font-semibold text-gray-900">Invita nuovo utente</h2>
+            <h2 className="font-semibold text-gray-900">Invita un utente</h2>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100">
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-5">
-          {status === 'sent' ? (
-            <div className="text-center py-6">
-              <div className="w-14 h-14 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <CheckCircle className="w-7 h-7 text-emerald-600" />
-              </div>
-              <p className="font-semibold text-gray-900 text-lg">Invito inviato!</p>
-              <p className="text-gray-500 text-sm mt-1">Email spedita a <strong>{email}</strong></p>
-              <button onClick={onClose} className="mt-5 px-6 py-2 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-600">
-                Chiudi
-              </button>
-            </div>
-          ) : status === 'exists' ? (
-            <div className="text-center py-6">
-              <div className="w-14 h-14 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <AlertTriangle className="w-7 h-7 text-amber-600" />
-              </div>
-              <p className="font-semibold text-gray-900">Utente già registrato</p>
-              <p className="text-gray-500 text-sm mt-1"><strong>{email}</strong> ha già un account.</p>
-              <button onClick={onClose} className="mt-5 px-6 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300">
-                Chiudi
-              </button>
+        {/* Body – scrollable flex area */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
+          {isDone ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center">
+              {emailStatus === 'sent' ? (
+                <>
+                  <div className="w-14 h-14 bg-emerald-100 rounded-full flex items-center justify-center mb-3">
+                    <CheckCircle className="w-7 h-7 text-emerald-600" />
+                  </div>
+                  <p className="font-semibold text-gray-900 text-lg">Invito inviato!</p>
+                  <p className="text-gray-500 text-sm mt-1">Email spedita a <strong>{input}</strong></p>
+                </>
+              ) : (
+                <>
+                  <div className="w-14 h-14 bg-amber-100 rounded-full flex items-center justify-center mb-3">
+                    <AlertTriangle className="w-7 h-7 text-amber-600" />
+                  </div>
+                  <p className="font-semibold text-gray-900">Già registrato</p>
+                  <p className="text-gray-500 text-sm mt-1"><strong>{input}</strong> ha già un account.</p>
+                </>
+              )}
             </div>
           ) : (
             <>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Indirizzo email <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <input
-                      ref={inputRef}
-                      type="email"
-                      value={email}
-                      onChange={e => setEmail(e.target.value)}
-                      placeholder="nome@esempio.com"
-                      className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Messaggio personale <span className="text-gray-400 font-normal">(opzionale)</span>
-                  </label>
-                  <textarea
-                    value={message}
-                    onChange={e => setMessage(e.target.value)}
-                    placeholder="Scrivi un messaggio di benvenuto..."
-                    rows={3}
-                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+              {/* Input */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Email o numero di telefono
+                </label>
+                <div className="relative">
+                  {isPhone
+                    ? <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    : <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  }
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={input}
+                    onChange={e => { setInput(e.target.value); setEmailStatus('idle'); setEmailError(''); }}
+                    placeholder="nome@esempio.com oppure +39 333 1234567"
+                    className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
-                {status === 'error' && (
-                  <p className="text-red-500 text-sm bg-red-50 px-3 py-2 rounded-lg">{errMsg}</p>
-                )}
+                {isEmail && <p className="text-xs text-emerald-600 mt-1">Email rilevata – invio per posta elettronica</p>}
+                {isPhone && !isEmail && <p className="text-xs text-sky-600 mt-1">Numero rilevato – scegli la piattaforma di messaggistica</p>}
               </div>
-              <div className="flex gap-3 mt-5">
-                <button onClick={onClose} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
-                  Annulla
-                </button>
-                <button
-                  onClick={send}
-                  disabled={!email || status === 'loading'}
-                  className="flex-1 py-2.5 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-600 disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {status === 'loading' ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <><Send className="w-4 h-4" /> Invia invito</>
-                  )}
-                </button>
+
+              {/* Message */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Messaggio <span className="text-gray-400 font-normal">(opzionale)</span>
+                </label>
+                <textarea
+                  value={message}
+                  onChange={e => setMessage(e.target.value)}
+                  placeholder="Lascia vuoto per il messaggio predefinito..."
+                  rows={3}
+                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+                />
               </div>
+
+              {emailStatus === 'error' && (
+                <p className="text-red-500 text-sm bg-red-50 px-3 py-2 rounded-lg">{emailError}</p>
+              )}
             </>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
 
-/* ─── WhatsApp Invite Modal ──────────────────────────────── */
-function WhatsAppModal({ prefillPhone, onClose }: { prefillPhone: string; onClose: () => void }) {
-  const [phone, setPhone] = useState(prefillPhone);
-  const [message, setMessage] = useState('');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'exists' | 'error'>('idle');
-  const [waUrl, setWaUrl] = useState('');
-  const [errMsg, setErrMsg] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { inputRef.current?.focus(); }, []);
-
-  const prepare = async () => {
-    setStatus('loading');
-    try {
-      const res = await api.post('/admin/users/invite-whatsapp', {
-        phone,
-        message: message || undefined,
-      });
-      setWaUrl(res.data.whatsappUrl);
-      setStatus('ready');
-    } catch (e: any) {
-      if (e.response?.status === 409) setStatus('exists');
-      else { setStatus('error'); setErrMsg(e.response?.data?.error || 'Errore'); }
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
-        <div className="flex items-center justify-between p-5 border-b border-gray-100">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-green-50 rounded-lg flex items-center justify-center">
-              <Phone className="w-4 h-4 text-green-600" />
-            </div>
-            <h2 className="font-semibold text-gray-900">Invita via WhatsApp</h2>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-5">
-          {status === 'ready' ? (
-            <div className="text-center py-4">
-              <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <Phone className="w-7 h-7 text-green-600" />
-              </div>
-              <p className="font-semibold text-gray-900 text-lg mb-1">Pronto!</p>
-              <p className="text-gray-500 text-sm mb-5">
-                Clicca il bottone per aprire WhatsApp con il messaggio precompilato.
-              </p>
-              <a
-                href={waUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={onClose}
-                className="inline-flex items-center gap-2 px-6 py-3 bg-green-500 text-white rounded-xl text-sm font-semibold hover:bg-green-600 transition-colors"
-              >
-                <Phone className="w-4 h-4" />
-                Apri WhatsApp
-              </a>
-              <button onClick={onClose} className="block mx-auto mt-3 text-sm text-gray-400 hover:text-gray-600">
+        {/* Footer with actions – fixed height so modal never resizes */}
+        <div className="flex-shrink-0 px-5 py-4 border-t border-gray-100" style={{ minHeight: '80px' }}>
+          {isDone ? (
+            <button
+              onClick={onClose}
+              className="w-full py-2.5 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200"
+            >
+              Chiudi
+            </button>
+          ) : isEmail ? (
+            <div className="flex gap-3">
+              <button onClick={onClose} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
                 Annulla
               </button>
-            </div>
-          ) : status === 'exists' ? (
-            <div className="text-center py-4">
-              <div className="w-14 h-14 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <AlertTriangle className="w-7 h-7 text-amber-600" />
-              </div>
-              <p className="font-semibold text-gray-900">Numero già registrato</p>
-              <p className="text-gray-500 text-sm mt-1">Questo numero è già associato a un account.</p>
-              <button onClick={onClose} className="mt-5 px-6 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300">
-                Chiudi
+              <button
+                onClick={sendEmail}
+                disabled={emailStatus === 'loading'}
+                className="flex-1 py-2.5 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-600 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {emailStatus === 'loading'
+                  ? <RefreshCw className="w-4 h-4 animate-spin" />
+                  : <><Send className="w-4 h-4" /> Invia email</>
+                }
               </button>
             </div>
-          ) : (
-            <>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Numero di telefono <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <input
-                      ref={inputRef}
-                      type="tel"
-                      value={phone}
-                      onChange={e => setPhone(e.target.value)}
-                      placeholder="+39 333 1234567"
-                      className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                    />
-                  </div>
-                  <p className="text-xs text-gray-400 mt-1">Includi il prefisso internazionale (es. +39 per Italia)</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Messaggio personalizzato <span className="text-gray-400 font-normal">(opzionale)</span>
-                  </label>
-                  <textarea
-                    value={message}
-                    onChange={e => setMessage(e.target.value)}
-                    placeholder="Lascia vuoto per usare il messaggio predefinito..."
-                    rows={3}
-                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
-                  />
-                </div>
-                {status === 'error' && (
-                  <p className="text-red-500 text-sm bg-red-50 px-3 py-2 rounded-lg">{errMsg}</p>
-                )}
-              </div>
-              <div className="flex gap-3 mt-5">
-                <button onClick={onClose} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
-                  Annulla
+          ) : isPhone ? (
+            <div>
+              <p className="text-xs text-gray-500 text-center mb-2">Scegli dove inviare l'invito:</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={handleWhatsApp}
+                  className="flex items-center justify-center gap-2 py-2.5 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 transition-colors"
+                >
+                  <Phone className="w-4 h-4" /> WhatsApp
                 </button>
                 <button
-                  onClick={prepare}
-                  disabled={!phone || status === 'loading'}
-                  className="flex-1 py-2.5 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 disabled:opacity-50 flex items-center justify-center gap-2"
+                  onClick={handleTelegram}
+                  className="flex items-center justify-center gap-2 py-2.5 bg-sky-500 text-white rounded-lg text-sm font-medium hover:bg-sky-600 transition-colors"
                 >
-                  {status === 'loading'
-                    ? <RefreshCw className="w-4 h-4 animate-spin" />
-                    : <><Phone className="w-4 h-4" /> Prepara messaggio</>
-                  }
+                  <Send className="w-4 h-4" /> Telegram
+                </button>
+                <button
+                  onClick={() => copyToClipboard('wechat')}
+                  className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    copiedPlatform === 'wechat' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {copiedPlatform === 'wechat' ? <CheckCircle className="w-4 h-4" /> : <Globe className="w-4 h-4" />}
+                  {copiedPlatform === 'wechat' ? 'Copiato!' : 'WeChat'}
+                </button>
+                <button
+                  onClick={() => copyToClipboard('alipay')}
+                  className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    copiedPlatform === 'alipay' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {copiedPlatform === 'alipay' ? <CheckCircle className="w-4 h-4" /> : <DollarSign className="w-4 h-4" />}
+                  {copiedPlatform === 'alipay' ? 'Copiato!' : 'Alipay'}
                 </button>
               </div>
-            </>
+            </div>
+          ) : (
+            <div className="flex gap-3">
+              <button onClick={onClose} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
+                Annulla
+              </button>
+              <div className="flex-1 py-2.5 bg-gray-50 rounded-lg text-sm text-center text-gray-400 flex items-center justify-center">
+                Inserisci email o telefono
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -449,12 +406,9 @@ export default function Admin() {
   const [groupTotal, setGroupTotal] = useState(0);
   const [groupPage, setGroupPage] = useState(1);
 
-  // Invite email
+  // Unified invite modal
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  // Invite WhatsApp
-  const [waOpen, setWaOpen] = useState(false);
-  const [waPhone, setWaPhone] = useState('');
+  const [invitePrefill, setInvitePrefill] = useState('');
 
   // Load stats
   useEffect(() => {
@@ -507,8 +461,8 @@ export default function Admin() {
     else { setSortBy(field); setSortDir('asc'); }
   };
 
-  const openInvite = (email = '') => { setInviteEmail(email); setInviteOpen(true); };
-  const openWhatsApp = (phone = '') => { setWaPhone(phone); setWaOpen(true); };
+  const openInvite = (value = '') => { setInvitePrefill(value); setInviteOpen(true); };
+  const openWhatsApp = (phone = '') => { setInvitePrefill(phone); setInviteOpen(true); };
 
   const tabs = [
     { key: 'overview' as Tab, label: 'Panoramica', icon: BarChart2 },
@@ -594,20 +548,12 @@ export default function Admin() {
               <RefreshCw className={`w-4 h-4 text-gray-500 ${loadingUsers ? 'animate-spin' : ''}`} />
             </button>
             <button
-              onClick={() => openInvite(isEmailLike(search) ? search : '')}
+              onClick={() => openInvite(search)}
               className="flex items-center gap-2 px-4 py-2.5 border border-emerald-300 text-emerald-700 bg-emerald-50 rounded-lg text-sm font-medium hover:bg-emerald-100 transition-colors"
-              title="Invita via email"
+              title="Invita utente"
             >
-              <Mail className="w-4 h-4" />
-              <span className="hidden sm:inline">Email</span>
-            </button>
-            <button
-              onClick={() => openWhatsApp(isPhoneLike(search) ? search : '')}
-              className="flex items-center gap-2 px-4 py-2.5 border border-green-300 text-green-700 bg-green-50 rounded-lg text-sm font-medium hover:bg-green-100 transition-colors"
-              title="Invita via WhatsApp"
-            >
-              <Phone className="w-4 h-4" />
-              <span className="hidden sm:inline">WhatsApp</span>
+              <UserPlus className="w-4 h-4" />
+              <span className="hidden sm:inline">Invita</span>
             </button>
           </div>
 
@@ -643,14 +589,14 @@ export default function Admin() {
               ) : isPhoneLike(debouncedSearch) ? (
                 <>
                   <p className="text-sm text-gray-500 mb-4">
-                    Nessun utente registrato con questo numero. Vuoi invitarlo via WhatsApp?
+                    Nessun utente registrato con questo numero. Vuoi invitarlo?
                   </p>
                   <button
-                    onClick={() => openWhatsApp(debouncedSearch)}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 transition-colors"
+                    onClick={() => openInvite(debouncedSearch)}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-sky-500 text-white rounded-lg text-sm font-medium hover:bg-sky-600 transition-colors"
                   >
                     <Phone className="w-4 h-4" />
-                    Invita via WhatsApp
+                    Invita via messaggio
                   </button>
                 </>
               ) : (
@@ -658,16 +604,12 @@ export default function Admin() {
                   <p className="text-sm text-gray-500 mb-4">
                     Cerca per email o numero di telefono per invitare qualcuno.
                   </p>
-                  <div className="flex gap-3 justify-center">
-                    <button onClick={() => openInvite()}
-                      className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-100">
-                      <Mail className="w-4 h-4" /> Invita via email
-                    </button>
-                    <button onClick={() => openWhatsApp()}
-                      className="inline-flex items-center gap-2 px-4 py-2 border border-green-300 text-green-700 bg-green-50 rounded-lg text-sm font-medium hover:bg-green-100">
-                      <Phone className="w-4 h-4" /> Invita via WhatsApp
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => openInvite()}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-600 transition-colors"
+                  >
+                    <UserPlus className="w-4 h-4" /> Invita utente
+                  </button>
                 </>
               )}
             </div>
@@ -826,9 +768,8 @@ export default function Admin() {
         </div>
       </div>
 
-      {/* Modals */}
-      {inviteOpen && <InviteModal prefillEmail={inviteEmail} onClose={() => setInviteOpen(false)} />}
-      {waOpen && <WhatsAppModal prefillPhone={waPhone} onClose={() => setWaOpen(false)} />}
+      {/* Unified invite modal */}
+      {inviteOpen && <UnifiedInviteModal prefill={invitePrefill} onClose={() => setInviteOpen(false)} />}
     </div>
   );
 }
