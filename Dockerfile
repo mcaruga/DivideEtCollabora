@@ -5,8 +5,10 @@ FROM node:20-alpine AS build
 WORKDIR /app
 
 # Install root + workspace deps (leverages layer caching)
+# backend's postinstall runs `prisma generate`, which needs the schema present.
 COPY package.json package-lock.json* ./
 COPY backend/package.json backend/
+COPY backend/prisma backend/prisma
 COPY frontend/package.json frontend/
 RUN npm install \
  && npm install --prefix backend \
