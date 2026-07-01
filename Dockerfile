@@ -34,6 +34,7 @@ ENV PORT=3001
 # Copy built artifacts + prod deps only
 COPY --from=build /app/backend/dist            ./backend/dist
 COPY --from=build /app/backend/prisma          ./backend/prisma
+COPY --from=build /app/backend/prisma.config.ts ./backend/prisma.config.ts
 COPY --from=build /app/backend/node_modules    ./backend/node_modules
 COPY --from=build /app/backend/package.json    ./backend/package.json
 COPY --from=build /app/frontend/dist           ./frontend/dist
@@ -46,4 +47,6 @@ VOLUME ["/app/backend/uploads"]
 EXPOSE 3001
 
 # Push schema on start (creates tables on first run), then launch server.
-CMD ["sh", "-c", "npx --prefix backend prisma db push --accept-data-loss --schema=backend/prisma/schema.prisma && node backend/dist/index.js"]
+# Must cd into backend/ first: prisma.config.ts (holding the datasource URL)
+# is only discovered from the current working directory.
+CMD ["sh", "-c", "cd backend && npx prisma db push --accept-data-loss && cd .. && node backend/dist/index.js"]
