@@ -1,0 +1,77 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: dec-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-divideetcollabora}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-divideetcollabora}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-divideetcollabora} -d ${POSTGRES_DB:-divideetcollabora}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Optional: expose on host for external tools; comment out for LAN-only isolation.
+    # ports:
+    #   - "5432:5432"
+
+  app:
+    build: .
+    container_name: dec-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-divideetcollabora}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-divideetcollabora}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env (min 32 chars)}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3001}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+    volumes:
+      - uploads:/app/backend/uploads
+    ports:
+      - "${APP_PORT:-3001}:3001"
+
+  # Nightly pg_dump into ./backups, keeps 14 days.
+  # Enable with: docker compose --profile backup up -d
+  backup:
+    image: postgres:16-alpine
+    container_name: dec-backup
+    restart: unless-stopped
+    profiles: ["backup"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-divideetcollabora}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-divideetcollabora}
+    volumes:
+      - ./backups:/backups
+    entrypoint: >
+      sh -c '
+      while true; do
+        ts=$$(date +%Y%m%d-%H%M%S);
+        echo "[backup] $$ts starting";
+        pg_dump -Fc -f /backups/dec-$$ts.dump && echo "[backup] $$ts ok" || echo "[backup] $$ts failed";
+        find /backups -name "dec-*.dump" -mtime +14 -delete;
+        sleep 86400;
+      done
+      '
+
+volumes:
+  db-data:
+  uploads:
