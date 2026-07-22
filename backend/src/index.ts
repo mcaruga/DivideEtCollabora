@@ -17,7 +17,18 @@ const isProd = process.env.NODE_ENV === 'production';
 
 app.use(helmet({
   crossOriginEmbedderPolicy: false,
-  contentSecurityPolicy: isProd ? undefined : false,
+  // Disable upgrade-insecure-requests: it forces the browser to load JS/CSS
+  // over HTTPS even when the app itself is served over plain HTTP (e.g. a
+  // LAN deployment with no TLS termination), which silently breaks asset
+  // loading and leaves a blank page.
+  contentSecurityPolicy: isProd
+    ? {
+        directives: {
+          ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+          'upgrade-insecure-requests': null,
+        },
+      }
+    : false,
 }));
 app.use(cors({
   origin: isProd ? true : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:8081'],
